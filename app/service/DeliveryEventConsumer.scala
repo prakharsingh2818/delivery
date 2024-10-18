@@ -2,8 +2,8 @@ package service
 
 import com.nashtech.order.v1.models.Order
 import com.nashtech.order.v1.models.json.jsonReadsOrderOrder
+import dao.ECDao
 import play.api.i18n.Lang.logger
-import dao.{DAO, ECDao}
 import play.api.libs.json.Json
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient
@@ -11,10 +11,10 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
-import software.amazon.kinesis.common.ConfigsBuilder
+import software.amazon.kinesis.common.{ConfigsBuilder, InitialPositionInStream, InitialPositionInStreamExtended, StreamIdentifier}
 import software.amazon.kinesis.coordinator.Scheduler
 import software.amazon.kinesis.lifecycle.events._
-import software.amazon.kinesis.processor.{ShardRecordProcessor, ShardRecordProcessorFactory}
+import software.amazon.kinesis.processor.{ShardRecordProcessor, ShardRecordProcessorFactory, SingleStreamTracker}
 import software.amazon.kinesis.retrieval.KinesisClientRecord
 
 import java.io.{BufferedReader, IOException, InputStreamReader}
@@ -51,6 +51,8 @@ class DeliveryEventConsumer @Inject()(
   }
 
   private def run(kinesisClient: KinesisAsyncClient): Unit = {
+    val streamName = "order-stream"
+    val applicationName = "delivery-application"
     val credentials = AwsBasicCredentials.create("test", "test")
     val credentialsProvider = StaticCredentialsProvider.create(credentials)
 
@@ -71,14 +73,20 @@ class DeliveryEventConsumer @Inject()(
       .build()
 
     val configsBuilder = new ConfigsBuilder(
-      "order-stream",
-      "delivery-application",
+      streamName,
+      applicationName,
       kinesisClient,
       dynamoClient,
       cloudWatchClient,
       UUID.randomUUID().toString,
       new DeliveryEventProcessorFactory(deliveryDao)
     )
+
+    val streamTracker = new SingleStreamTracker(
+      StreamIdentifier.singleStreamInstance(streamName),
+      InitialPositionInStreamExtended.newInitialPosition(InitialPositionInStream.TRIM_HORIZON) // Specify starting position as TRIM_HORIZON
+    )
+
 
     val scheduler = new Scheduler(
       configsBuilder.checkpointConfig,
@@ -87,7 +95,7 @@ class DeliveryEventConsumer @Inject()(
       configsBuilder.lifecycleConfig,
       configsBuilder.metricsConfig,
       configsBuilder.processorConfig,
-      configsBuilder.retrievalConfig
+      configsBuilder.retrievalConfig().streamTracker(streamTracker)
     )
 
     val schedulerThread = new Thread(scheduler)
@@ -130,8 +138,8 @@ class DeliveryEventProcessor @Inject()(ecDao: ECDao) extends ShardRecordProcesso
       logger.info("Processing " + processRecordsInput.records.size + " record(s)")
       processRecordsInput.records.forEach((r: KinesisClientRecord) => processRecord(r))
     } catch {
-      case _: Throwable =>
-        logger.error("Caught throwable while processing records. Aborting.")
+      case e: Throwable =>
+        logger.error("Caught throwable while processing records. Aborting.", e)
         Runtime.getRuntime.halt(1)
     }
 

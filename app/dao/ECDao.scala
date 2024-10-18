@@ -36,7 +36,10 @@ class ECDao @Inject()(db: Database) {
            |'${merchantId}',
            |${order.total},
            |'${order.submittedAt}'
-           |)
+           |) ON CONFLICT (id)
+           |DO UPDATE
+           |set total = '${order.total}',
+           |submitted_at = '${order.submittedAt}'::timestamptz
            |returning *
            |""".stripMargin
       query

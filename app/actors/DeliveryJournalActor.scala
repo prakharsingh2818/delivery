@@ -4,15 +4,10 @@ import akka.actor.{ActorSystem, Cancellable}
 import play.api.db.Database
 import play.api.i18n.Lang.logger
 import service.DeliveryEventConsumer
-import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
-import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient
-import software.amazon.awssdk.regions.Region
-import software.amazon.awssdk.services.kinesis.KinesisAsyncClient
 
 import javax.inject.{Inject, Singleton}
-import scala.concurrent.Future
 import scala.concurrent.duration.{FiniteDuration, SECONDS}
-import scala.util.{Success, Try}
+import scala.util.Success
 
 @Singleton
 class DeliveryJournalActor @Inject()(system: ActorSystem,
@@ -25,6 +20,7 @@ class DeliveryJournalActor @Inject()(system: ActorSystem,
   override def preStart(): Unit = {
     logger.info("[DeliveryJournalActor] Inside preStart")
     startPolling()
+    deliveryEventConsumer.initialize()
   }
 
   def schedule(): Cancellable = {
@@ -34,7 +30,6 @@ class DeliveryJournalActor @Inject()(system: ActorSystem,
   override def process(record: ProcessQueueDelivery): Unit = {
     record.operation match {
       case "INSERT" | "UPDATE" =>
-        deliveryEventConsumer.initialize()
         //throw new ArithmeticException("Error occur")
       case "DELETE" => Success(())
     }
